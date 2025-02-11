@@ -1,9 +1,9 @@
 {
 	"name": "@travvy/artint",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"module": "index.ts",
 	"bin": {
-		"ai": "./index.ts"
+		"ai": "./dist/index.js"
 	},
 	"devDependencies": {
 		"@types/bun": "latest",
