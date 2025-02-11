@@ -1,0 +1,13 @@
+{
+	"name": "@travvy/artint",
+	"version": "0.0.1",
+	"module": "index.ts",
+	"bin": {
+		"ai": "./index.ts"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"typescript": "^5.7.3"
+	},
+	"type": "module"
+}
