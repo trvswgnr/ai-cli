@@ -1,5 +1,5 @@
 import { highlight, supportsLanguage } from "cli-highlight";
-import chalk from "chalk";
+import { default as chalk } from "chalk";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createPerplexity } from "@ai-sdk/perplexity";
 import { streamText } from "ai";
