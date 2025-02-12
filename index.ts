@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 import { highlight, supportsLanguage, type Theme } from "cli-highlight";
 import chalk from "chalk";
 
@@ -13,8 +15,6 @@ ai What is the capital of France?
 
 const NEWLINE = "\n";
 const CODE_BLOCK_MD = "```";
-
-
 
 type OptionType = "boolean" | "string";
 
@@ -129,7 +129,7 @@ class ArgumentParser {
 			}
 		}
 
-		// Validate required options
+		// validate required options
 		for (const [key, config] of objectEntries(this.config)) {
 			if (config.required && !this.options[key]) {
 				throw `Required option '${key}' is missing`;
@@ -200,7 +200,8 @@ if (!apiKey) {
 		process.exit(1);
 	}
 
-	if (options.search) {
+	if (options.search || options.url !== "") {
+		options.search = true;
 		apiKey = process.env.PERPLEXITY_API_KEY;
 		if (!apiKey) {
 			console.error("PERPLEXITY_API_KEY must be set as an environment variable");
@@ -254,25 +255,25 @@ if (!apiKey) {
 		const chunk = decoder.decode(value, { stream: true });
 		buffer += chunk;
 
-		// Process complete code blocks
+		// process complete code blocks
 		while (buffer.includes(CODE_BLOCK_MD)) {
 			const start = buffer.indexOf(CODE_BLOCK_MD);
 			const end = buffer.indexOf(CODE_BLOCK_MD, start + CODE_BLOCK_MD.length);
 
 			if (end === -1) break; // incomplete code block
 
-			// Output text before code block
+			// output text before code block
 			process.stdout.write(buffer.slice(0, start));
 
-			// Extract and highlight code block
+			// extract and highlight code block
 			const codeBlock = buffer.slice(start, end + 3);
 			process.stdout.write(highlightCode(codeBlock));
 
-			// Update buffer
+			// update buffer
 			buffer = buffer.slice(end + 3);
 		}
 
-		// Output any remaining text
+		// output any remaining text
 		const lastCodeBlock = buffer.lastIndexOf(CODE_BLOCK_MD);
 		if (lastCodeBlock === -1) {
 			process.stdout.write(buffer);
