@@ -70,7 +70,9 @@ class ArgumentParser {
 	}
 }
 
-async function withServer(fn: (url: string) => Promise<void>) {
+async function withServerRunning(
+	fn: (url: string) => Promise<void>,
+): Promise<void> {
 	// Try ports starting from 3000 until we find an available one
 	let port = 3000;
 	let server: Server | undefined;
@@ -96,15 +98,13 @@ async function withServer(fn: (url: string) => Promise<void>) {
 	}
 
 	if (typeof server === "undefined") {
-		throw new Error("No available ports found between 3000-3999");
+		throw "no available ports found between 3000-3999";
 	}
 
 	// Update the endpoint URL with the actual port
 	const ENDPOINT_URL = `http://localhost:${port}/gen`;
 
-	await fn(ENDPOINT_URL);
-
-	server.stop(true);
+	await fn(ENDPOINT_URL).finally(() => server.stop(true));
 }
 
 async function POST(req: Request) {
@@ -140,7 +140,14 @@ async function POST(req: Request) {
 	return result.toTextStreamResponse();
 }
 
-function parsePayload(payload: unknown) {
+type Payload = {
+	apiKey: string;
+	prompt: string;
+	search: boolean;
+	url: string;
+};
+
+function parsePayload(payload: unknown): string | Payload {
 	if (typeof payload !== "object" || payload === null) {
 		return "malformed request body";
 	}
@@ -255,21 +262,21 @@ interface ParsedArgs {
 	options: Options;
 }
 
-function objectEntries<T extends object>(obj: T): [keyof T, T[keyof T]][] {
-	return Object.entries(obj) as [keyof T, T[keyof T]][];
+function objectEntries<K extends string, V>(obj: Record<K, V>): [K, V][] {
+	return Object.entries(obj) as [K, V][];
 }
 
-function printHelp(): void {
-	console.log(USAGE);
-	console.log("\nOptions:");
+const HELP_MESSAGE = (() => {
+	let s = USAGE;
+	s += "\nOptions:";
 	for (const [key, config] of objectEntries(OPTIONS_CONFIG)) {
 		const shortOption = config.short ? `-${config.short}, ` : "    ";
 		const required = config.required ? " (required)" : "";
-		console.log(
-			`  ${shortOption}--${key.padEnd(20)} ${config.description}${required}`,
-		);
+
+		s += `  ${shortOption}--${key.padEnd(20)} ${config.description}${required}`;
 	}
-}
+	return s;
+})();
 
 function highlightCode(text: string): string {
 	if (!text.startsWith(CODE_BLOCK_MD)) return text;
@@ -289,30 +296,29 @@ ${
 ${chalk.dim(CODE_BLOCK_MD)}\n`;
 }
 
-async function processAiCommand(url: string) {
+async function processAiCommand(url: string): Promise<void> {
 	let apiKey = process.env.ANTHROPIC_API_KEY;
 	if (!apiKey) {
-		console.error("ANTHROPIC_API_KEY must be set as an environment variable");
-		process.exit(1);
+		throw "ANTHROPIC_API_KEY must be set as an environment variable";
 	}
 	const parser = new ArgumentParser(OPTIONS_CONFIG);
 	const { prompt, options } = parser.parse(process.argv.slice(2));
 
 	if (options.help) {
-		printHelp();
-		process.exit(0);
+		console.log(HELP_MESSAGE);
+		return;
 	}
 
 	if (options.version) {
 		const packageJson = await import("./package.json");
 		const version = packageJson.version;
 		console.log(`v${version}`);
-		process.exit(0);
+		return;
 	}
 
 	if (!prompt) {
 		console.error("Error: prompt is required");
-		printHelp();
+		console.log(HELP_MESSAGE);
 		process.exit(1);
 	}
 
@@ -320,18 +326,13 @@ async function processAiCommand(url: string) {
 		options.search = true;
 		apiKey = process.env.PERPLEXITY_API_KEY;
 		if (!apiKey) {
-			console.error(
-				"PERPLEXITY_API_KEY must be set as an environment variable",
-			);
-			process.exit(1);
+			throw "PERPLEXITY_API_KEY must be set as an environment variable";
 		}
 	}
 
 	const response = await fetch(url, {
 		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-		},
+		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
 			prompt,
 			apiKey,
@@ -343,21 +344,18 @@ async function processAiCommand(url: string) {
 	if (!response.ok) {
 		console.error("failed to fetch from", url);
 		console.error(response.status, response.statusText);
-		try {
-			const body = await response.json();
-			console.error(body);
-		} catch (error) {
-			console.error(error);
-		}
-		process.exit(1);
+		throw await response.json();
 	}
 
 	if (!response.body) {
-		console.error("No body");
-		process.exit(1);
+		throw "no body in response";
 	}
 
-	const reader = response.body.getReader();
+	await printStream(response.body);
+}
+
+async function printStream(stream: ReadableStream<Uint8Array>): Promise<void> {
+	const reader = stream.getReader();
 	let buffer = "";
 
 	while (true) {
@@ -384,11 +382,11 @@ async function processAiCommand(url: string) {
 			process.stdout.write(buffer.slice(0, start));
 
 			// extract and highlight code block
-			const codeBlock = buffer.slice(start, end + 3);
+			const codeBlock = buffer.slice(start, end + CODE_BLOCK_MD.length);
 			process.stdout.write(highlightCode(codeBlock));
 
 			// update buffer
-			buffer = buffer.slice(end + 3);
+			buffer = buffer.slice(end + CODE_BLOCK_MD.length);
 		}
 
 		// output any remaining text
@@ -400,16 +398,14 @@ async function processAiCommand(url: string) {
 	}
 }
 
-try {
+async function main() {
 	const url = process.env.AI_ENDPOINT_URL;
-	if (!url) {
-		// no url provided, start server locally
-		await withServer(processAiCommand);
-	} else {
+	if (url) {
 		// url provided, use it
-		processAiCommand(url);
+		return await processAiCommand(url);
 	}
-} catch (error) {
-	console.error("Error:", error);
-	process.exit(1);
+	// no url provided, start temporary server locally
+	return await withServerRunning(processAiCommand);
 }
+
+await main().catch(console.error);
