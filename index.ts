@@ -226,7 +226,7 @@ const OPTIONS_CONFIG = {
 	},
 	url: {
 		short: "u",
-		description: "Custom API endpoint URL",
+		description: "Search a specific URL",
 		type: "string",
 		default: "",
 		required: false,
