@@ -1,7 +1,5 @@
 import { highlight, supportsLanguage } from "cli-highlight";
 import { default as chalk } from "chalk";
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createPerplexity } from "@ai-sdk/perplexity";
 import { streamText } from "ai";
 import type { Server } from "bun";
 
@@ -114,15 +112,14 @@ async function POST(req: Request) {
 	if (typeof parsed === "string") {
 		return new Response(JSON.stringify({ error: parsed }), {
 			status: 400,
-			headers: {
-				"Content-Type": "application/json",
-			},
+			headers: { "Content-Type": "application/json" },
 		});
 	}
 
 	const { apiKey, prompt, search, url } = parsed;
 
 	if (search) {
+		const { createPerplexity } = await import("@ai-sdk/perplexity");
 		const perplexity = createPerplexity({ apiKey });
 		const model = perplexity("sonar-pro");
 		let p = prompt;
@@ -133,6 +130,7 @@ async function POST(req: Request) {
 		return result.toTextStreamResponse();
 	}
 
+	const { createAnthropic } = await import("@ai-sdk/anthropic");
 	const anthropic = createAnthropic({ apiKey });
 	const model = anthropic("claude-3-5-sonnet-latest");
 	const result = streamText({ model, prompt });
@@ -317,9 +315,7 @@ async function processAiCommand(url: string): Promise<void> {
 	}
 
 	if (!prompt) {
-		console.error("Error: prompt is required");
-		console.log(HELP_MESSAGE);
-		process.exit(1);
+		throw `Error: prompt is required\n${HELP_MESSAGE}`;
 	}
 
 	if (options.search || options.url !== "") {
@@ -401,7 +397,7 @@ async function printStream(stream: ReadableStream<Uint8Array>): Promise<void> {
 async function main() {
 	const url = process.env.AI_ENDPOINT_URL;
 	if (url) {
-		// url provided, use it
+		// remote url provided, use it directly
 		return await processAiCommand(url);
 	}
 	// no url provided, start temporary server locally
