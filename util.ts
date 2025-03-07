@@ -31,5 +31,5 @@ export type ObjectEntries<T> = UnionToTuple<
 export function objectEntries<R extends Record<string, unknown>>(
 	obj: R,
 ): ObjectEntries<R> {
-	return Object.entries(obj) as never;
+	return Object.entries(obj) as ObjectEntries<R>; // only ok to cast bc we are absolutely sure
 }
