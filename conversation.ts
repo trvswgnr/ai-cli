@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { nanoid } from "nanoid";
 import { existsSync } from "fs";
 import { mkdir } from "fs/promises";
-import { join, dirname } from "path";
+import { join } from "path";
 
 // Define message types
 type Role = "system" | "user" | "assistant";
