@@ -3,13 +3,24 @@ import { default as chalk } from "chalk";
 import { streamText } from "ai";
 import { objectEntries } from "./util";
 import { parseArgs } from "./args";
+import { saveMessage, getConversation, getCurrentConversationId } from "./conversation";
 
 async function genStreamResponse({
     apiKey,
     prompt,
     search,
     url,
+    conversationId,
 }: Payload): Promise<Response> {
+    // Store the user's message
+    if (conversationId) {
+        await saveMessage({
+            conversationId,
+            role: "user",
+            content: prompt,
+        });
+    }
+
     if (search) {
         const { createPerplexity } = await import("@ai-sdk/perplexity");
         const perplexity = createPerplexity({ apiKey });
@@ -22,10 +33,23 @@ async function genStreamResponse({
         return result.toTextStreamResponse();
     }
 
+    // Get conversation history if we have a conversation ID
+    let fullPrompt = prompt;
+    if (conversationId) {
+        const conversation = await getConversation(conversationId);
+        if (conversation.length > 0) {
+            // Format previous messages for Claude
+            const history = conversation
+                .map(msg => `${msg.role}: ${msg.content}`)
+                .join("\n\n");
+            fullPrompt = `${history}\n\nuser: ${prompt}\n\nassistant:`;
+        }
+    }
+
     const { createAnthropic } = await import("@ai-sdk/anthropic");
     const anthropic = createAnthropic({ apiKey });
     const model = anthropic("claude-3-5-sonnet-latest");
-    const result = streamText({ model, prompt });
+    const result = streamText({ model, prompt: fullPrompt });
 
     return result.toTextStreamResponse();
 }
@@ -35,6 +59,7 @@ type Payload = {
     prompt: string;
     search: boolean;
     url: string;
+    conversationId?: string;
 };
 
 const decoder = new TextDecoder();
@@ -78,6 +103,13 @@ const OPTIONS_CONFIG = {
         default: false,
         required: false,
     },
+    new: {
+        short: "n",
+        description: "Start a new conversation",
+        type: "boolean",
+        default: false,
+        required: false,
+    }
 } as const;
 
 const HELP_MESSAGE = (() => {
@@ -143,11 +175,41 @@ async function processAiCommand(): Promise<void> {
         }
     }
 
+    // Handle conversation persistence
+    let conversationId: string | undefined;
+    if (!options.search) {
+        // Only use conversations for Claude, not for search
+        if (options.new) {
+            // Start a new conversation
+            conversationId = await saveMessage({
+                role: "system",
+                content: "You are Claude, a helpful AI assistant.",
+                createNewConversation: true
+            });
+            console.log(chalk.dim(`Starting new conversation: ${conversationId}`));
+        } else {
+            // Get or create conversation ID
+            conversationId = await getCurrentConversationId();
+            if (!conversationId) {
+                // No current conversation exists, create one
+                conversationId = await saveMessage({
+                    role: "system",
+                    content: "You are Claude, a helpful AI assistant.",
+                    createNewConversation: true
+                });
+                console.log(chalk.dim(`Starting new conversation: ${conversationId}`));
+            } else {
+                console.log(chalk.dim(`Continuing conversation: ${conversationId}`));
+            }
+        }
+    }
+
     const response = await genStreamResponse({
         prompt,
         apiKey,
         search: options.search,
         url: options.url,
+        conversationId,
     });
 
     if (!response.ok) {
@@ -160,18 +222,31 @@ async function processAiCommand(): Promise<void> {
         throw "no body in response";
     }
 
-    await printStream(response.body);
+    // Capture assistant's response
+    const responseText = await printStream(response.body);
+    
+    // Save assistant response if we're in a conversation
+    if (conversationId && !options.search) {
+        await saveMessage({
+            conversationId,
+            role: "assistant",
+            content: responseText,
+        });
+    }
 }
 
-async function printStream(stream: ReadableStream<Uint8Array>): Promise<void> {
+async function printStream(stream: ReadableStream<Uint8Array>): Promise<string> {
     const reader = stream.getReader();
     let buffer = "";
+    let fullResponse = "";
 
     while (true) {
         const { done, value } = await reader.read();
         if (done) {
             if (buffer) {
-                process.stdout.write(highlightCode(buffer));
+                const highlighted = highlightCode(buffer);
+                process.stdout.write(highlighted);
+                fullResponse += buffer;
             }
             process.stdout.write("\n");
             break;
@@ -179,6 +254,7 @@ async function printStream(stream: ReadableStream<Uint8Array>): Promise<void> {
 
         const chunk = decoder.decode(value, { stream: true });
         buffer += chunk;
+        fullResponse += chunk;
 
         // process complete code blocks
         while (buffer.includes(CODE_BLOCK_MD)) {
@@ -208,6 +284,8 @@ async function printStream(stream: ReadableStream<Uint8Array>): Promise<void> {
             buffer = "";
         }
     }
+    
+    return fullResponse;
 }
 
 async function main() {
